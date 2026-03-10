@@ -160,12 +160,19 @@ def process_message(customer_id, message, client):
     
     response_text = ""
     stream = client.chat.completions.create(
-        model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
-        messages=messages,
-        temperature=0.7,
-        max_tokens=1024,
-        stream=True
-    )
+      import streamlit as st
+
+# Get the model from secrets (or default)
+model = st.secrets.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+response_text = ""
+stream = client.chat.completions.create(
+    model=model,
+    messages=messages,
+    temperature=0.7,
+    max_tokens=1024,
+    stream=True
+)
     
     for chunk in stream:
         if chunk.choices[0].delta.content:
