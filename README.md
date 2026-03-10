@@ -27,8 +27,6 @@ animations.py
 requirements.txt
 ```
 
-## Screenshots
-(Add screenshots below)
 
 ## Live Demo
 [Click Here](YOUR_LINK_HERE)
