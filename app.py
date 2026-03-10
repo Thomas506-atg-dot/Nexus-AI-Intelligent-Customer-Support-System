@@ -1,6 +1,5 @@
 """
 AI Customer Service Bot - PREMIUM EDITION
-Modern, Animated, Professional UI
 Final Year Project - Intelligent Customer Support System
 """
 
@@ -10,9 +9,46 @@ from dotenv import load_dotenv
 from datetime import datetime
 import time
 import hashlib
-import traceback
 
-# ============== AUTHENTICATION SYSTEM ==============
+# ============== PAGE CONFIG ==============
+
+st.set_page_config(
+    page_title="Nexus AI | Intelligent Customer Support",
+    page_icon="🤖",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+load_dotenv()
+
+# Initialize session state
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+
+if 'customer_id' not in st.session_state:
+    st.session_state.customer_id = f"CUST-{datetime.now().strftime('%H%M%S')}"
+
+if 'admin_logged_in' not in st.session_state:
+    st.session_state.admin_logged_in = False
+    st.session_state.admin_username = None
+
+# ============== CUSTOM MODULES ==============
+
+from database import (
+    save_conversation, get_all_conversations, get_escalated_conversations,
+    get_analytics, init_sample_orders, get_order_status
+)
+from sentiment_analyzer import analyzer
+from escalation import escalation_manager
+from animations import (
+    load_css_animations, render_typing_indicator, render_severity_badge,
+    render_metric_card, render_glass_card
+)
+
+load_css_animations()
+init_sample_orders()
+
+# ============== AUTHENTICATION ==============
 
 ADMIN_CREDENTIALS = {
     "admin": hashlib.sha256("admin123".encode()).hexdigest(),
@@ -23,9 +59,6 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def check_admin_auth():
-    if 'admin_logged_in' not in st.session_state:
-        st.session_state.admin_logged_in = False
-        st.session_state.admin_username = None
     return st.session_state.admin_logged_in
 
 def login_admin(username, password):
@@ -69,41 +102,10 @@ def show_login_form():
     <div style="text-align: center; margin-top: 2rem; color: rgba(255,255,255,0.5);">
         <p>Default credentials:</p>
         <p>Username: <b>admin</b> | Password: <b>admin123</b></p>
-        <p>Username: <b>manager</b> | Password: <b>manager456</b></p>
     </div>
     """, unsafe_allow_html=True)
 
-# ============== PAGE CONFIG ==============
-
-st.set_page_config(
-    page_title="Nexus AI | Intelligent Customer Support",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-load_dotenv()
-
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-
-if 'customer_id' not in st.session_state:
-    st.session_state.customer_id = f"CUST-{datetime.now().strftime('%H%M%S')}"
-
-# ============== CUSTOM MODULES ==============
-
-from database import (
-    save_conversation, get_all_conversations, get_escalated_conversations,
-    get_analytics, init_sample_orders, get_order_status
-)
-from sentiment_analyzer import analyzer
-from escalation import escalation_manager
-from animations import (
-    load_css_animations, render_typing_indicator, render_severity_badge,
-    render_metric_card, render_glass_card
-)
-
-load_css_animations()
+# ============== AI CLIENT ==============
 
 CUSTOMER_SERVICE_PROMPT = """You are Nexus AI, an elite Customer Service Assistant for a premium e-commerce platform.
 
@@ -120,80 +122,45 @@ Guidelines:
 - Never fabricate order information
 """
 
-init_sample_orders()
-
-# ============== GROQ CLIENT WITH DEBUGGING ==============
-
 @st.cache_resource
 def get_groq_client():
-    """Initialize and cache the Groq client"""
+    """Get Groq client - works locally AND on Streamlit Cloud"""
     try:
         from groq import Groq
         
-        # Check if groq is installed
-        st.success("✅ Groq package found")
-        
-        # Get API key
         api_key = None
         
-        # Try Streamlit secrets
+        # Try Streamlit Cloud Secrets first
         try:
             api_key = st.secrets["GROQ_API_KEY"]
-            st.success(f"✅ Found API key in Streamlit secrets (length: {len(api_key)})")
-        except Exception as e:
-            st.warning(f"⚠️ Could not read from secrets: {e}")
-            # Try environment
+        except:
+            pass
+        
+        # Fallback to local .env file
+        if not api_key:
             api_key = os.getenv("GROQ_API_KEY")
-            if api_key:
-                st.success(f"✅ Found API key in environment (length: {len(api_key)})")
         
         if not api_key:
-            st.error("❌ GROQ_API_KEY not found in secrets or environment!")
-            st.info("💡 Fix: Go to Streamlit Cloud → Settings → Secrets → Add: GROQ_API_KEY = 'your-key'")
             return None
         
-        # Clean key
+        # Clean the key
         api_key = api_key.strip().strip('"').strip("'")
         
-        # Initialize client
-        client = Groq(api_key=api_key)
-        st.success("✅ Groq client initialized successfully")
-        return client
+        return Groq(api_key=api_key)
         
-    except ImportError as e:
-        st.error(f"❌ Groq package not installed: {e}")
-        st.info("💡 Fix: Add 'groq>=0.4.0' to requirements.txt and redeploy")
+    except Exception:
         return None
-    except Exception as e:
-        st.error(f"❌ Error initializing Groq: {str(e)}")
-        st.code(traceback.format_exc())
-        return None
-
-# ============== MESSAGE PROCESSING ==============
 
 def process_message(customer_id, message, client):
-    """Process customer message and generate response"""
-    
-    # DEBUG: Check client
+    """Process message with AI"""
     if client is None:
-        return "⚠️ Error: AI service not available. Please check API configuration.", {'label': 'NEUTRAL', 'severity': 5, 'intent': 'GENERAL'}, False
+        return "⚠️ AI service not available. Please configure GROQ_API_KEY.", {'label': 'NEUTRAL', 'severity': 5, 'intent': 'GENERAL'}, False
     
     try:
-        # Analyze sentiment
         analysis = analyzer.analyze(message)
         
-        # Check for order info
-        order_info = None
-        if analysis['intent'] == 'ORDER':
-            import re
-            order_match = re.search(r'ORD-\d+', message.upper())
-            if order_match:
-                order_info = get_order_status(order_match.group(), customer_id)
-        
         # Check escalation
-        should_escalate = analyzer.should_escalate(analysis)
-        
-        if should_escalate:
+        if analyzer.should_escalate(analysis):
             ticket_id, response = escalation_manager.escalate(customer_id, message, analysis)
             save_conversation(customer_id, message, response, analysis['label'], 
                              analysis['severity'], analysis['intent'], True, ticket_id)
@@ -201,18 +168,14 @@ def process_message(customer_id, message, client):
         
         # Prepare messages
         system_msg = CUSTOMER_SERVICE_PROMPT
-        if order_info:
-            system_msg += f"\n\nOrder Context: {order_info}"
-        
         messages = [
             {"role": "system", "content": system_msg},
             {"role": "user", "content": message}
         ]
         
-        # Get model
+        # Call Groq API
         model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
         
-        # Call API
         response_text = ""
         stream = client.chat.completions.create(
             model=model,
@@ -226,24 +189,22 @@ def process_message(customer_id, message, client):
             if chunk.choices[0].delta.content:
                 response_text += chunk.choices[0].delta.content
         
-        # Save conversation
         save_conversation(customer_id, message, response_text, analysis['label'],
                          analysis['severity'], analysis['intent'], False)
         
         return response_text, analysis, False
         
     except Exception as e:
-        error_msg = f"I apologize, but I'm having trouble processing your request right now. (Error: {str(e)})"
+        error_msg = f"I apologize, but I'm having trouble right now. ({str(e)})"
         return error_msg, {'label': 'NEUTRAL', 'severity': 5, 'intent': 'GENERAL'}, False
 
-# ============== SIDEBAR NAVIGATION ==============
+# ============== SIDEBAR ==============
 
 with st.sidebar:
     st.markdown("""
     <div style="text-align: center; padding: 1rem 0;">
         <div style="font-size: 3rem; margin-bottom: 0.5rem;">🤖</div>
         <h2 style="color: #333; margin: 0; font-weight: 700;">NEXUS AI</h2>
-        <p style="color: rgba(0,0,0,0.6); font-size: 0.9rem;">Intelligent Support</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -254,7 +215,6 @@ with st.sidebar:
     
     if is_admin_mode:
         if not check_admin_auth():
-            st.warning("Please login to access admin panel")
             page = "login"
         else:
             st.success(f"Welcome, {st.session_state.admin_username}!")
@@ -269,117 +229,68 @@ with st.sidebar:
             ])
     else:
         page = "💬 Live Support"
-        st.info("👋 Welcome! How can we help you today?")
     
-    st.markdown("---")
-    
-    status_color = "#27ae60" if check_admin_auth() or not is_admin_mode else "#e74c3c"
-    status_text = "Admin Online" if check_admin_auth() else "System Online"
-    
-    st.markdown(f"""
-    <div style="background: rgba(39, 174, 96, 0.1); border: 1px solid rgba(39, 174, 96, 0.3); 
-                border-radius: 12px; padding: 1rem; text-align: center;">
-        <span style="color: {status_color}; font-weight: 600;">● {status_text}</span>
-        <p style="color: rgba(0,0,0,0.5); font-size: 0.8rem; margin: 0.5rem 0 0 0;">
-            All services operational
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Status indicator
+    client = get_groq_client()
+    if client:
+        st.success("✅ AI Online")
+    else:
+        st.error("❌ AI Offline - Check API Key")
 
-# ============== MAIN CONTENT ==============
+# ============== MAIN PAGES ==============
 
 if is_admin_mode and not check_admin_auth():
     show_login_form()
     st.stop()
 
-# ============== CUSTOMER CHAT PAGE ==============
-
 if page == "💬 Live Support" or page == "💬 Live Support (Test)":
     st.markdown("""
     <div style="text-align: center; padding: 2rem 0;">
         <h1 class="animated-header">Nexus AI Support</h1>
-        <p style="color: rgba(255,255,255,0.6); font-size: 1.1rem; margin-top: 1rem;">
-            Experience the future of customer service with emotional intelligence
-        </p>
     </div>
     """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         customer_id = st.text_input("Customer ID", value=st.session_state.customer_id, 
-                                   key="cust_id", label_visibility="collapsed",
-                                   placeholder="Enter Customer ID...")
+                                   key="cust_id", label_visibility="collapsed")
     
-    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-    
-    for i, msg in enumerate(st.session_state.chat_history):
+    # Chat history
+    for msg in st.session_state.chat_history:
         with st.chat_message(msg['role'], avatar="🧑‍💼" if msg['role'] == 'user' else "🤖"):
-            st.markdown(f'<div class="chat-message-enter" style="animation-delay: {i*0.1}s">', 
-                       unsafe_allow_html=True)
             st.markdown(msg['content'])
-            
             if msg['role'] == 'assistant' and 'analysis' in msg:
                 cols = st.columns([1, 1, 1, 2])
                 with cols[0]:
                     sentiment = msg['analysis']['label']
                     emoji = "😊" if sentiment == "POSITIVE" else "😠" if sentiment == "NEGATIVE" else "😐"
-                    st.markdown(f"<span style='color: rgba(255,255,255,0.7);'>{emoji} {sentiment}</span>", 
-                               unsafe_allow_html=True)
+                    st.markdown(f"{emoji} {sentiment}")
                 with cols[1]:
                     render_severity_badge(msg['analysis']['severity'])
-                with cols[2]:
-                    st.markdown(f"<span style='color: rgba(255,255,255,0.7); font-size: 0.85rem;'>"
-                               f"🎯 {msg['analysis']['intent']}</span>", unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
     
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Initialize Groq client with debug info
-    client = get_groq_client()
-    
-    if client is None:
-        st.error("⚠️ Cannot start chat: GROQ_API_KEY missing or invalid")
-        st.info("👆 Check the success/warning messages above to see what's wrong")
-    else:
-        if prompt := st.chat_input("How can Nexus AI assist you today?", key="chat_input"):
+    # Input
+    if client := get_groq_client():
+        if prompt := st.chat_input("How can Nexus AI assist you today?"):
             st.session_state.chat_history.append({'role': 'user', 'content': prompt})
             
             with st.chat_message('user', avatar="🧑‍💼"):
                 st.markdown(prompt)
             
             with st.chat_message('assistant', avatar="🤖"):
-                typing_placeholder = st.empty()
-                with typing_placeholder:
-                    render_typing_indicator()
-                
-                time.sleep(0.5)
-                response, analysis, escalated = process_message(customer_id, prompt, client)
-                
-                typing_placeholder.empty()
+                with st.spinner("🤖 Nexus AI is typing..."):
+                    response, analysis, escalated = process_message(customer_id, prompt, client)
                 
                 if escalated:
-                    st.markdown(f"""
-                    <div style="background: linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.3));
-                                border: 1px solid rgba(231, 76, 60, 0.5);
-                                border-radius: 16px; padding: 1.5rem;">
-                        <h3 style="color: #e74c3c; margin: 0 0 1rem 0;">🚨 Priority Escalation</h3>
-                        <p style="color: white; margin: 0; line-height: 1.6;">{response}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.markdown(response)
+                    st.error("🚨 Priority Escalation")
+                st.markdown(response)
                 
                 cols = st.columns([1, 1, 1, 2])
                 with cols[0]:
                     sentiment = analysis['label']
                     emoji = "😊" if sentiment == "POSITIVE" else "😠" if sentiment == "NEGATIVE" else "😐"
-                    st.markdown(f"<span style='color: rgba(255,255,255,0.7);'>{emoji} {sentiment}</span>", 
-                               unsafe_allow_html=True)
+                    st.markdown(f"{emoji} {sentiment}")
                 with cols[1]:
                     render_severity_badge(analysis['severity'])
-                with cols[2]:
-                    st.markdown(f"<span style='color: rgba(255,255,255,0.7); font-size: 0.85rem;'>"
-                               f"🎯 {analysis['intent']}</span>", unsafe_allow_html=True)
                 
                 st.session_state.chat_history.append({
                     'role': 'assistant',
@@ -387,8 +298,10 @@ if page == "💬 Live Support" or page == "💬 Live Support (Test)":
                     'analysis': analysis,
                     'escalated': escalated
                 })
-
-# ============== ADMIN PAGES ==============
+    else:
+        st.error("⚠️ Cannot connect to AI service")
+        st.info("1. Get API key from console.groq.com")
+        st.info("2. Add to Streamlit Cloud: Settings → Secrets → GROQ_API_KEY")
 
 elif page == "📊 Command Center":
     st.markdown('<h1 class="animated-header">📊 Command Center</h1>', unsafe_allow_html=True)
@@ -406,8 +319,6 @@ elif page == "📊 Command Center":
     for col, (val, label, icon) in zip(cols, metric_data):
         with col:
             render_metric_card(val, label, icon)
-    
-    st.markdown("---")
     
     col1, col2 = st.columns(2)
     
@@ -428,14 +339,11 @@ elif page == "📊 Command Center":
                     paper_bgcolor='rgba(0,0,0,0)',
                     plot_bgcolor='rgba(0,0,0,0)',
                     font_color='white',
-                    showlegend=True,
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.1)
+                    showlegend=True
                 )
                 st.plotly_chart(fig, use_container_width=True)
             except ImportError:
-                st.info("📊 Install plotly for charts")
-        else:
-            st.info("No data available")
+                st.info("Install plotly for charts")
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
@@ -447,18 +355,14 @@ elif page == "📊 Command Center":
                 emoji = "😊" if row['sentiment'] == 'POSITIVE' else "😠" if row['sentiment'] == 'NEGATIVE' else "😐"
                 st.markdown(f"""
                 <div style="background: rgba(255,255,255,0.05); border-radius: 12px; 
-                            padding: 1rem; margin-bottom: 0.5rem; border-left: 4px solid {'#e74c3c' if row['escalated'] else '#27ae60'};">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span style="color: white; font-weight: 500;">{emoji} {row['customer_id']}</span>
-                        <span style="color: rgba(255,255,255,0.5); font-size: 0.8rem;">{row['timestamp']}</span>
-                    </div>
-                    <p style="color: rgba(255,255,255,0.7); margin: 0.5rem 0 0 0; font-size: 0.9rem;">
+                            padding: 1rem; margin-bottom: 0.5rem; 
+                            border-left: 4px solid {'#e74c3c' if row['escalated'] else '#27ae60'};">
+                    <span style="color: white;">{emoji} {row['customer_id']}</span>
+                    <p style="color: rgba(255,255,255,0.7); margin: 0.5rem 0 0 0;">
                         {str(row['message'])[:50]}...
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
-        else:
-            st.info("No recent conversations")
         st.markdown('</div>', unsafe_allow_html=True)
 
 elif page == "🚨 Priority Queue":
@@ -467,37 +371,14 @@ elif page == "🚨 Priority Queue":
     escalated = get_escalated_conversations()
     
     if escalated.empty:
-        st.markdown("""
-        <div style="text-align: center; padding: 4rem 2rem;">
-            <div style="font-size: 4rem; margin-bottom: 1rem;">✅</div>
-            <h3 style="color: white; margin: 0;">No Escalations</h3>
-            <p style="color: rgba(255,255,255,0.6);">All customers are being handled smoothly</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.success("✅ No escalations - all customers handled smoothly")
     else:
         for _, row in escalated.iterrows():
             with st.expander(f"🚨 Ticket {row['ticket_id']} | {row['customer_id']} | Severity {row['severity']}/10"):
                 st.markdown(f"""
                 <div style="background: rgba(231, 76, 60, 0.1); border-radius: 16px; padding: 1.5rem;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-                        <div>
-                            <p style="color: rgba(255,255,255,0.5); margin: 0; font-size: 0.85rem;">Timestamp</p>
-                            <p style="color: white; margin: 0.25rem 0 0 0; font-weight: 500;">{row['timestamp']}</p>
-                        </div>
-                        <div>
-                            <p style="color: rgba(255,255,255,0.5); margin: 0; font-size: 0.85rem;">Intent</p>
-                            <p style="color: white; margin: 0.25rem 0 0 0; font-weight: 500;">{row['intent']}</p>
-                        </div>
-                    </div>
-                    <div style="margin-bottom: 1rem;">
-                        <p style="color: rgba(255,255,255,0.5); margin: 0; font-size: 0.85rem;">Customer Message</p>
-                        <p style="color: white; margin: 0.5rem 0 0 0; padding: 1rem; 
-                                  background: rgba(0,0,0,0.3); border-radius: 8px;">{row['message']}</p>
-                    </div>
-                    <div>
-                        <p style="color: rgba(255,255,255,0.5); margin: 0; font-size: 0.85rem;">AI Response</p>
-                        <p style="color: rgba(255,255,255,0.8); margin: 0.5rem 0 0 0;">{row['response']}</p>
-                    </div>
+                    <p style="color: white;"><b>Message:</b> {row['message']}</p>
+                    <p style="color: rgba(255,255,255,0.8);"><b>Response:</b> {row['response']}</p>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -507,7 +388,6 @@ elif page == "📋 Conversation Log":
     df = get_all_conversations()
     
     if not df.empty:
-        st.markdown('<div class="glass-card" style="margin-bottom: 1rem;">', unsafe_allow_html=True)
         col1, col2, col3 = st.columns(3)
         with col1:
             sentiment_filter = st.selectbox("Sentiment", ["All"] + list(df['sentiment'].unique()))
@@ -515,7 +395,6 @@ elif page == "📋 Conversation Log":
             intent_filter = st.selectbox("Intent", ["All"] + list(df['intent'].unique()))
         with col3:
             escalated_filter = st.selectbox("Status", ["All", "Escalated", "Resolved"])
-        st.markdown('</div>', unsafe_allow_html=True)
         
         filtered = df
         if sentiment_filter != "All":
@@ -527,21 +406,13 @@ elif page == "📋 Conversation Log":
         elif escalated_filter == "Resolved":
             filtered = filtered[filtered['escalated'] == False]
         
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.dataframe(
             filtered[['timestamp', 'customer_id', 'sentiment', 'severity', 'intent', 'escalated', 'message']],
             use_container_width=True,
             hide_index=True
         )
-        st.markdown('</div>', unsafe_allow_html=True)
         
         csv = filtered.to_csv(index=False)
-        st.download_button(
-            "📥 Export Data",
-            csv,
-            "nexus_conversations.csv",
-            "text/csv",
-            use_container_width=True
-        )
+        st.download_button("📥 Export Data", csv, "nexus_conversations.csv", "text/csv")
     else:
         st.info("No conversations recorded yet")
