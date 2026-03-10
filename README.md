@@ -29,7 +29,7 @@ requirements.txt
 
 
 ## Live Demo
-[Click Here]([YOUR_LINK_HERE](https://nexus-ai-intelligent-customer-support-system-hugrwea7qe32rcu6w.streamlit.app/)
+[Click Here]([YOUR_LINK_HERE](https://nexus-ai-intelligent-customer-support-system-hugrwea7qe32rcu6w.streamlit.app/))
 
 ## Installation
 
