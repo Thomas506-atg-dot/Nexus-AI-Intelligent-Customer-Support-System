@@ -10,29 +10,25 @@ from dotenv import load_dotenv
 from datetime import datetime
 import time
 import hashlib
+import traceback
 
 # ============== AUTHENTICATION SYSTEM ==============
 
-# Simple admin credentials (in production, use database)
 ADMIN_CREDENTIALS = {
     "admin": hashlib.sha256("admin123".encode()).hexdigest(),
     "manager": hashlib.sha256("manager456".encode()).hexdigest()
 }
 
 def hash_password(password):
-    """Hash password for secure comparison"""
     return hashlib.sha256(password.encode()).hexdigest()
 
 def check_admin_auth():
-    """Check if admin is authenticated"""
     if 'admin_logged_in' not in st.session_state:
         st.session_state.admin_logged_in = False
         st.session_state.admin_username = None
-    
     return st.session_state.admin_logged_in
 
 def login_admin(username, password):
-    """Authenticate admin"""
     if username in ADMIN_CREDENTIALS:
         if hash_password(password) == ADMIN_CREDENTIALS[username]:
             st.session_state.admin_logged_in = True
@@ -41,12 +37,10 @@ def login_admin(username, password):
     return False
 
 def logout_admin():
-    """Logout admin"""
     st.session_state.admin_logged_in = False
     st.session_state.admin_username = None
 
 def show_login_form():
-    """Display admin login form"""
     st.markdown("""
     <div style="max-width: 400px; margin: 0 auto; padding: 2rem; 
                 background: rgba(255,255,255,0.05); border-radius: 20px; 
@@ -88,10 +82,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Load environment variables
 load_dotenv()
 
-# Initialize session state variables
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
@@ -111,10 +103,8 @@ from animations import (
     render_metric_card, render_glass_card
 )
 
-# Load CSS animations
 load_css_animations()
 
-# Customer Service System Prompt
 CUSTOMER_SERVICE_PROMPT = """You are Nexus AI, an elite Customer Service Assistant for a premium e-commerce platform.
 
 Your capabilities:
@@ -130,10 +120,9 @@ Guidelines:
 - Never fabricate order information
 """
 
-# Initialize sample orders
 init_sample_orders()
 
-# ============== GROQ CLIENT SETUP ==============
+# ============== GROQ CLIENT WITH DEBUGGING ==============
 
 @st.cache_resource
 def get_groq_client():
@@ -141,61 +130,89 @@ def get_groq_client():
     try:
         from groq import Groq
         
-        # Try to get API key from secrets first, then environment
+        # Check if groq is installed
+        st.success("✅ Groq package found")
+        
+        # Get API key
         api_key = None
+        
+        # Try Streamlit secrets
         try:
             api_key = st.secrets["GROQ_API_KEY"]
-        except:
+            st.success(f"✅ Found API key in Streamlit secrets (length: {len(api_key)})")
+        except Exception as e:
+            st.warning(f"⚠️ Could not read from secrets: {e}")
+            # Try environment
             api_key = os.getenv("GROQ_API_KEY")
+            if api_key:
+                st.success(f"✅ Found API key in environment (length: {len(api_key)})")
         
         if not api_key:
+            st.error("❌ GROQ_API_KEY not found in secrets or environment!")
+            st.info("💡 Fix: Go to Streamlit Cloud → Settings → Secrets → Add: GROQ_API_KEY = 'your-key'")
             return None
         
-        return Groq(api_key=api_key)
+        # Clean key
+        api_key = api_key.strip().strip('"').strip("'")
+        
+        # Initialize client
+        client = Groq(api_key=api_key)
+        st.success("✅ Groq client initialized successfully")
+        return client
+        
+    except ImportError as e:
+        st.error(f"❌ Groq package not installed: {e}")
+        st.info("💡 Fix: Add 'groq>=0.4.0' to requirements.txt and redeploy")
+        return None
     except Exception as e:
+        st.error(f"❌ Error initializing Groq: {str(e)}")
+        st.code(traceback.format_exc())
         return None
 
 # ============== MESSAGE PROCESSING ==============
 
 def process_message(customer_id, message, client):
     """Process customer message and generate response"""
+    
+    # DEBUG: Check client
     if client is None:
-        return "⚠️ Service temporarily unavailable. Please try again later.", {'label': 'NEUTRAL', 'severity': 5, 'intent': 'GENERAL'}, False
-    
-    # Analyze sentiment
-    analysis = analyzer.analyze(message)
-    
-    # Check for order information
-    order_info = None
-    if analysis['intent'] == 'ORDER':
-        import re
-        order_match = re.search(r'ORD-\d+', message.upper())
-        if order_match:
-            order_info = get_order_status(order_match.group(), customer_id)
-    
-    # Check if escalation is needed
-    should_escalate = analyzer.should_escalate(analysis)
-    
-    if should_escalate:
-        ticket_id, response = escalation_manager.escalate(customer_id, message, analysis)
-        save_conversation(customer_id, message, response, analysis['label'], 
-                         analysis['severity'], analysis['intent'], True, ticket_id)
-        return response, analysis, True
-    
-    # Prepare system message
-    system_msg = CUSTOMER_SERVICE_PROMPT
-    if order_info:
-        system_msg += f"\n\nOrder Context: {order_info}"
-    
-    messages = [
-        {"role": "system", "content": system_msg},
-        {"role": "user", "content": message}
-    ]
-    
-    # Get model from environment or use default
-    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        return "⚠️ Error: AI service not available. Please check API configuration.", {'label': 'NEUTRAL', 'severity': 5, 'intent': 'GENERAL'}, False
     
     try:
+        # Analyze sentiment
+        analysis = analyzer.analyze(message)
+        
+        # Check for order info
+        order_info = None
+        if analysis['intent'] == 'ORDER':
+            import re
+            order_match = re.search(r'ORD-\d+', message.upper())
+            if order_match:
+                order_info = get_order_status(order_match.group(), customer_id)
+        
+        # Check escalation
+        should_escalate = analyzer.should_escalate(analysis)
+        
+        if should_escalate:
+            ticket_id, response = escalation_manager.escalate(customer_id, message, analysis)
+            save_conversation(customer_id, message, response, analysis['label'], 
+                             analysis['severity'], analysis['intent'], True, ticket_id)
+            return response, analysis, True
+        
+        # Prepare messages
+        system_msg = CUSTOMER_SERVICE_PROMPT
+        if order_info:
+            system_msg += f"\n\nOrder Context: {order_info}"
+        
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": message}
+        ]
+        
+        # Get model
+        model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        
+        # Call API
         response_text = ""
         stream = client.chat.completions.create(
             model=model,
@@ -216,8 +233,8 @@ def process_message(customer_id, message, client):
         return response_text, analysis, False
         
     except Exception as e:
-        error_msg = f"I apologize, but I'm having trouble processing your request right now. Please try again in a moment."
-        return error_msg, analysis, False
+        error_msg = f"I apologize, but I'm having trouble processing your request right now. (Error: {str(e)})"
+        return error_msg, {'label': 'NEUTRAL', 'severity': 5, 'intent': 'GENERAL'}, False
 
 # ============== SIDEBAR NAVIGATION ==============
 
@@ -232,12 +249,9 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Mode selection
     user_mode = st.radio("Select Mode", ["🧑‍💼 Customer", "🔐 Admin"], key="user_mode")
-    
     is_admin_mode = (user_mode == "🔐 Admin")
     
-    # If admin mode, check authentication
     if is_admin_mode:
         if not check_admin_auth():
             st.warning("Please login to access admin panel")
@@ -247,7 +261,6 @@ with st.sidebar:
             if st.button("🚪 Logout", use_container_width=True):
                 logout_admin()
                 st.rerun()
-            
             page = st.radio("Admin Panel", [
                 "📊 Command Center", 
                 "🚨 Priority Queue",
@@ -255,13 +268,11 @@ with st.sidebar:
                 "💬 Live Support (Test)"
             ])
     else:
-        # Customer mode - only chat
         page = "💬 Live Support"
         st.info("👋 Welcome! How can we help you today?")
     
     st.markdown("---")
     
-    # System status
     status_color = "#27ae60" if check_admin_auth() or not is_admin_mode else "#e74c3c"
     status_text = "Admin Online" if check_admin_auth() else "System Online"
     
@@ -277,7 +288,6 @@ with st.sidebar:
 
 # ============== MAIN CONTENT ==============
 
-# Show login form if admin mode but not logged in
 if is_admin_mode and not check_admin_auth():
     show_login_form()
     st.stop()
@@ -285,7 +295,6 @@ if is_admin_mode and not check_admin_auth():
 # ============== CUSTOMER CHAT PAGE ==============
 
 if page == "💬 Live Support" or page == "💬 Live Support (Test)":
-    # Header
     st.markdown("""
     <div style="text-align: center; padding: 2rem 0;">
         <h1 class="animated-header">Nexus AI Support</h1>
@@ -295,17 +304,14 @@ if page == "💬 Live Support" or page == "💬 Live Support (Test)":
     </div>
     """, unsafe_allow_html=True)
     
-    # Customer ID input
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         customer_id = st.text_input("Customer ID", value=st.session_state.customer_id, 
                                    key="cust_id", label_visibility="collapsed",
                                    placeholder="Enter Customer ID...")
     
-    # Chat container
     st.markdown('<div class="chat-container">', unsafe_allow_html=True)
     
-    # Display messages
     for i, msg in enumerate(st.session_state.chat_history):
         with st.chat_message(msg['role'], avatar="🧑‍💼" if msg['role'] == 'user' else "🤖"):
             st.markdown(f'<div class="chat-message-enter" style="animation-delay: {i*0.1}s">', 
@@ -328,42 +334,34 @@ if page == "💬 Live Support" or page == "💬 Live Support (Test)":
     
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Chat input
+    # Initialize Groq client with debug info
     client = get_groq_client()
     
     if client is None:
-        st.error("⚠️ GROQ_API_KEY not found. Please set it in Streamlit secrets (Settings → Secrets) with key 'GROQ_API_KEY'.")
+        st.error("⚠️ Cannot start chat: GROQ_API_KEY missing or invalid")
+        st.info("👆 Check the success/warning messages above to see what's wrong")
     else:
         if prompt := st.chat_input("How can Nexus AI assist you today?", key="chat_input"):
-            # Add user message to history
             st.session_state.chat_history.append({'role': 'user', 'content': prompt})
             
-            # Display user message
             with st.chat_message('user', avatar="🧑‍💼"):
                 st.markdown(prompt)
             
-            # Generate and display assistant response
             with st.chat_message('assistant', avatar="🤖"):
                 typing_placeholder = st.empty()
                 with typing_placeholder:
                     render_typing_indicator()
                 
-                # Small delay for realism
                 time.sleep(0.5)
-                
-                # Process message
                 response, analysis, escalated = process_message(customer_id, prompt, client)
                 
-                # Clear typing indicator
                 typing_placeholder.empty()
                 
-                # Display response
                 if escalated:
                     st.markdown(f"""
                     <div style="background: linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.3));
                                 border: 1px solid rgba(231, 76, 60, 0.5);
-                                border-radius: 16px; padding: 1.5rem;
-                                animation: pulse 2s infinite;">
+                                border-radius: 16px; padding: 1.5rem;">
                         <h3 style="color: #e74c3c; margin: 0 0 1rem 0;">🚨 Priority Escalation</h3>
                         <p style="color: white; margin: 0; line-height: 1.6;">{response}</p>
                     </div>
@@ -371,7 +369,6 @@ if page == "💬 Live Support" or page == "💬 Live Support (Test)":
                 else:
                     st.markdown(response)
                 
-                # Display analysis badges
                 cols = st.columns([1, 1, 1, 2])
                 with cols[0]:
                     sentiment = analysis['label']
@@ -384,7 +381,6 @@ if page == "💬 Live Support" or page == "💬 Live Support (Test)":
                     st.markdown(f"<span style='color: rgba(255,255,255,0.7); font-size: 0.85rem;'>"
                                f"🎯 {analysis['intent']}</span>", unsafe_allow_html=True)
                 
-                # Add to chat history
                 st.session_state.chat_history.append({
                     'role': 'assistant',
                     'content': response,
@@ -399,7 +395,6 @@ elif page == "📊 Command Center":
     
     metrics = get_analytics()
     
-    # Metrics row
     cols = st.columns(4)
     metric_data = [
         (metrics['total_chats'], "Total Conversations", "💬"),
@@ -414,7 +409,6 @@ elif page == "📊 Command Center":
     
     st.markdown("---")
     
-    # Charts
     col1, col2 = st.columns(2)
     
     with col1:
@@ -439,9 +433,9 @@ elif page == "📊 Command Center":
                 )
                 st.plotly_chart(fig, use_container_width=True)
             except ImportError:
-                st.info("📊 Install plotly for charts: pip install plotly")
+                st.info("📊 Install plotly for charts")
         else:
-            st.info("No data available yet")
+            st.info("No data available")
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
@@ -513,7 +507,6 @@ elif page == "📋 Conversation Log":
     df = get_all_conversations()
     
     if not df.empty:
-        # Filters
         st.markdown('<div class="glass-card" style="margin-bottom: 1rem;">', unsafe_allow_html=True)
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -524,7 +517,6 @@ elif page == "📋 Conversation Log":
             escalated_filter = st.selectbox("Status", ["All", "Escalated", "Resolved"])
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Apply filters
         filtered = df
         if sentiment_filter != "All":
             filtered = filtered[filtered['sentiment'] == sentiment_filter]
@@ -535,7 +527,6 @@ elif page == "📋 Conversation Log":
         elif escalated_filter == "Resolved":
             filtered = filtered[filtered['escalated'] == False]
         
-        # Styled dataframe
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.dataframe(
             filtered[['timestamp', 'customer_id', 'sentiment', 'severity', 'intent', 'escalated', 'message']],
@@ -544,7 +535,6 @@ elif page == "📋 Conversation Log":
         )
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Export
         csv = filtered.to_csv(index=False)
         st.download_button(
             "📥 Export Data",
