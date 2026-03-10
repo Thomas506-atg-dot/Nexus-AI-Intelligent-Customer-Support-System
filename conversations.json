@@ -1,0 +1,50 @@
+{
+  "conversations": [
+    {
+      "id": 1,
+      "customer_id": "CUST-222316",
+      "message": "hello",
+      "response": "Hello. Welcome to our premium e-commerce platform. I'm Nexus AI, your dedicated Customer Service Assistant. How can I assist you today? Do you have any questions, need help with an order, or perhaps have a concern you'd like to discuss? I'm here to listen and provide support.",
+      "sentiment": "NEUTRAL",
+      "severity": 5,
+      "intent": "GENERAL",
+      "escalated": false,
+      "ticket_id": null,
+      "timestamp": "2026-03-05T22:23:26.257109"
+    },
+    {
+      "id": 2,
+      "customer_id": "CUST-222316",
+      "message": "fuck you",
+      "response": "\u26a0\ufe0f Priority Support\n\nTicket #TKT-20260305-223603 created.\n\nA human agent will assist you within 1 hour.",
+      "sentiment": "NEGATIVE",
+      "severity": 7,
+      "intent": "GENERAL",
+      "escalated": true,
+      "ticket_id": "TKT-20260305-223603",
+      "timestamp": "2026-03-05T22:36:03.669829"
+    },
+    {
+      "id": 3,
+      "customer_id": "CUST-222316",
+      "message": "Im very disapointed with ur admin, how to slap him",
+      "response": "I can sense your frustration and disappointment. I'm truly sorry to hear that you're feeling this way. However, I want to assure you that violence or aggression is never an acceptable solution. Instead, I'd like to help you find a constructive way to address your concerns.\n\nCould you please tell me more about what's causing your frustration with our administration? I'm here to listen and help resolve any issues you may be facing. I'll do my best to provide a solution or escalate the matter to a human specialist if needed. Your satisfaction is important to us, and I'm committed to making things right.",
+      "sentiment": "POSITIVE",
+      "severity": 4,
+      "intent": "GENERAL",
+      "escalated": false,
+      "ticket_id": null,
+      "timestamp": "2026-03-05T22:36:43.157494"
+    }
+  ],
+  "tickets": [
+    {
+      "ticket_id": "TKT-20260305-223603",
+      "customer_id": "CUST-222316",
+      "issue_type": "GENERAL",
+      "priority": 7,
+      "status": "OPEN",
+      "created_at": "2026-03-05T22:36:03.664360"
+    }
+  ]
+}
