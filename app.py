@@ -11,20 +11,6 @@ from datetime import datetime
 import time
 import hashlib
 
-# Import custom modules
-from database import (
-    save_conversation, get_all_conversations, get_escalated_conversations,
-    get_analytics, init_sample_orders, get_order_status
-)
-from sentiment_analyzer import analyzer
-from escalation import escalation_manager
-from animations import (
-    load_css_animations, render_typing_indicator, render_severity_badge,
-    render_metric_card, render_glass_card
-)
-
-load_dotenv()
-
 # ============== AUTHENTICATION SYSTEM ==============
 
 # Simple admin credentials (in production, use database)
@@ -102,6 +88,30 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Load environment variables
+load_dotenv()
+
+# Initialize session state variables
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+
+if 'customer_id' not in st.session_state:
+    st.session_state.customer_id = f"CUST-{datetime.now().strftime('%H%M%S')}"
+
+# ============== CUSTOM MODULES ==============
+
+from database import (
+    save_conversation, get_all_conversations, get_escalated_conversations,
+    get_analytics, init_sample_orders, get_order_status
+)
+from sentiment_analyzer import analyzer
+from escalation import escalation_manager
+from animations import (
+    load_css_animations, render_typing_indicator, render_severity_badge,
+    render_metric_card, render_glass_card
+)
+
+# Load CSS animations
 load_css_animations()
 
 # Customer Service System Prompt
@@ -120,20 +130,42 @@ Guidelines:
 - Never fabricate order information
 """
 
+# Initialize sample orders
 init_sample_orders()
 
-# ============== FUNCTIONS ==============
+# ============== GROQ CLIENT SETUP ==============
 
+@st.cache_resource
 def get_groq_client():
-    from groq import Groq
-    import streamlit as st
+    """Initialize and cache the Groq client"""
+    try:
+        from groq import Groq
+        
+        # Try to get API key from secrets first, then environment
+        api_key = None
+        try:
+            api_key = st.secrets["GROQ_API_KEY"]
+        except:
+            api_key = os.getenv("GROQ_API_KEY")
+        
+        if not api_key:
+            return None
+        
+        return Groq(api_key=api_key)
+    except Exception as e:
+        return None
 
-    api_key = st.secrets["GROQ_API_KEY"]
-    return Groq(api_key=api_key)
+# ============== MESSAGE PROCESSING ==============
 
 def process_message(customer_id, message, client):
+    """Process customer message and generate response"""
+    if client is None:
+        return "⚠️ Service temporarily unavailable. Please try again later.", {'label': 'NEUTRAL', 'severity': 5, 'intent': 'GENERAL'}, False
+    
+    # Analyze sentiment
     analysis = analyzer.analyze(message)
     
+    # Check for order information
     order_info = None
     if analysis['intent'] == 'ORDER':
         import re
@@ -141,6 +173,7 @@ def process_message(customer_id, message, client):
         if order_match:
             order_info = get_order_status(order_match.group(), customer_id)
     
+    # Check if escalation is needed
     should_escalate = analyzer.should_escalate(analysis)
     
     if should_escalate:
@@ -149,6 +182,7 @@ def process_message(customer_id, message, client):
                          analysis['severity'], analysis['intent'], True, ticket_id)
         return response, analysis, True
     
+    # Prepare system message
     system_msg = CUSTOMER_SERVICE_PROMPT
     if order_info:
         system_msg += f"\n\nOrder Context: {order_info}"
@@ -158,30 +192,32 @@ def process_message(customer_id, message, client):
         {"role": "user", "content": message}
     ]
     
-    response_text = ""
-    stream = client.chat.completions.create(
-      import streamlit as st
-
-# Get the model from secrets (or default)
-model = st.secrets.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-
-response_text = ""
-stream = client.chat.completions.create(
-    model=model,
-    messages=messages,
-    temperature=0.7,
-    max_tokens=1024,
-    stream=True
-)
+    # Get model from environment or use default
+    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     
-    for chunk in stream:
-        if chunk.choices[0].delta.content:
-            response_text += chunk.choices[0].delta.content
-    
-    save_conversation(customer_id, message, response_text, analysis['label'],
-                     analysis['severity'], analysis['intent'], False)
-    
-    return response_text, analysis, False
+    try:
+        response_text = ""
+        stream = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=1024,
+            stream=True
+        )
+        
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                response_text += chunk.choices[0].delta.content
+        
+        # Save conversation
+        save_conversation(customer_id, message, response_text, analysis['label'],
+                         analysis['severity'], analysis['intent'], False)
+        
+        return response_text, analysis, False
+        
+    except Exception as e:
+        error_msg = f"I apologize, but I'm having trouble processing your request right now. Please try again in a moment."
+        return error_msg, analysis, False
 
 # ============== SIDEBAR NAVIGATION ==============
 
@@ -252,17 +288,14 @@ if page == "💬 Live Support" or page == "💬 Live Support (Test)":
     # Header
     st.markdown("""
     <div style="text-align: center; padding: 2rem 0;">
-        <h1 class="animated-header float">Nexus AI Support</h1>
+        <h1 class="animated-header">Nexus AI Support</h1>
         <p style="color: rgba(255,255,255,0.6); font-size: 1.1rem; margin-top: 1rem;">
             Experience the future of customer service with emotional intelligence
         </p>
     </div>
     """, unsafe_allow_html=True)
     
-    # Customer ID
-    if 'customer_id' not in st.session_state:
-        st.session_state.customer_id = f"CUST-{datetime.now().strftime('%H%M%S')}"
-    
+    # Customer ID input
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         customer_id = st.text_input("Customer ID", value=st.session_state.customer_id, 
@@ -271,9 +304,6 @@ if page == "💬 Live Support" or page == "💬 Live Support (Test)":
     
     # Chat container
     st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-    
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
     
     # Display messages
     for i, msg in enumerate(st.session_state.chat_history):
@@ -298,25 +328,36 @@ if page == "💬 Live Support" or page == "💬 Live Support (Test)":
     
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Input
+    # Chat input
     client = get_groq_client()
-    if client:
+    
+    if client is None:
+        st.error("⚠️ GROQ_API_KEY not found. Please set it in Streamlit secrets (Settings → Secrets) with key 'GROQ_API_KEY'.")
+    else:
         if prompt := st.chat_input("How can Nexus AI assist you today?", key="chat_input"):
+            # Add user message to history
             st.session_state.chat_history.append({'role': 'user', 'content': prompt})
             
+            # Display user message
             with st.chat_message('user', avatar="🧑‍💼"):
                 st.markdown(prompt)
             
+            # Generate and display assistant response
             with st.chat_message('assistant', avatar="🤖"):
                 typing_placeholder = st.empty()
                 with typing_placeholder:
                     render_typing_indicator()
                 
+                # Small delay for realism
                 time.sleep(0.5)
+                
+                # Process message
                 response, analysis, escalated = process_message(customer_id, prompt, client)
                 
+                # Clear typing indicator
                 typing_placeholder.empty()
                 
+                # Display response
                 if escalated:
                     st.markdown(f"""
                     <div style="background: linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.3));
@@ -330,6 +371,7 @@ if page == "💬 Live Support" or page == "💬 Live Support (Test)":
                 else:
                     st.markdown(response)
                 
+                # Display analysis badges
                 cols = st.columns([1, 1, 1, 2])
                 with cols[0]:
                     sentiment = analysis['label']
@@ -342,6 +384,7 @@ if page == "💬 Live Support" or page == "💬 Live Support (Test)":
                     st.markdown(f"<span style='color: rgba(255,255,255,0.7); font-size: 0.85rem;'>"
                                f"🎯 {analysis['intent']}</span>", unsafe_allow_html=True)
                 
+                # Add to chat history
                 st.session_state.chat_history.append({
                     'role': 'assistant',
                     'content': response,
@@ -378,22 +421,27 @@ elif page == "📊 Command Center":
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.subheader("Sentiment Distribution")
         if metrics['sentiment_distribution']:
-            import plotly.express as px
-            colors = ['#27ae60', '#e74c3c', '#f39c12']
-            fig = px.pie(
-                values=list(metrics['sentiment_distribution'].values()),
-                names=list(metrics['sentiment_distribution'].keys()),
-                hole=0.6,
-                color_discrete_sequence=colors
-            )
-            fig.update_layout(
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font_color='white',
-                showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=-0.1)
-            )
-            st.plotly_chart(fig, use_container_width=True)
+            try:
+                import plotly.express as px
+                colors = ['#27ae60', '#e74c3c', '#f39c12']
+                fig = px.pie(
+                    values=list(metrics['sentiment_distribution'].values()),
+                    names=list(metrics['sentiment_distribution'].keys()),
+                    hole=0.6,
+                    color_discrete_sequence=colors
+                )
+                fig.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font_color='white',
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.1)
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            except ImportError:
+                st.info("📊 Install plotly for charts: pip install plotly")
+        else:
+            st.info("No data available yet")
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
@@ -411,10 +459,12 @@ elif page == "📊 Command Center":
                         <span style="color: rgba(255,255,255,0.5); font-size: 0.8rem;">{row['timestamp']}</span>
                     </div>
                     <p style="color: rgba(255,255,255,0.7); margin: 0.5rem 0 0 0; font-size: 0.9rem;">
-                        {row['message'][:50]}...
+                        {str(row['message'])[:50]}...
                     </p>
                 </div>
                 """, unsafe_allow_html=True)
+        else:
+            st.info("No recent conversations")
         st.markdown('</div>', unsafe_allow_html=True)
 
 elif page == "🚨 Priority Queue":
