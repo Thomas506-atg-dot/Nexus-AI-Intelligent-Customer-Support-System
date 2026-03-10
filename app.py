@@ -126,10 +126,9 @@ init_sample_orders()
 
 def get_groq_client():
     from groq import Groq
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        st.error("⚠️ Please configure GROQ_API_KEY in .env file")
-        return None
+    import streamlit as st
+
+    api_key = st.secrets["GROQ_API_KEY"]
     return Groq(api_key=api_key)
 
 def process_message(customer_id, message, client):
