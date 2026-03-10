@@ -49,6 +49,11 @@ pip install -r requirements.txt
 ```
 streamlit run app.py
 ```
+## Screenshots
+
+![Chatbot UI](Screenshot 2026-03-10 004456.png)
+
+![Screenshot 2026-03-10 004508.png](Screenshot 2026-03-10 0045512.png)
 
 ## Author
 Thomas
